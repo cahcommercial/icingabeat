@@ -3,6 +3,7 @@ package beater
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -12,6 +13,77 @@ import (
 
 	"github.com/elastic/beats/libbeat/logp"
 )
+
+type Results struct {
+	Results []Result
+}
+
+// nested within sbserver response
+type Result struct {
+	Name       string
+	Attributes struct {
+		Variables struct {
+			ClientEndpoint  string `json:"client_endpoint"`
+			Environment     string `json:"env"`
+			OperatingSystem string `json:"os"`
+			Product         string `json:"product"`
+			Brand           string `json:"brand"`
+			HTTP            struct {
+				Custom struct {
+					URL       string `json:"http_vhost"`
+					HostGroup string `json:"hostgroup"`
+				} `json:"custom_vars"`
+			} `json:"http_vars"`
+		} `json:"vars"`
+	} `json:"attrs"`
+}
+
+func getIcingaHostTags(host string, icingaURL string, icingaPort string, user string, password string) map[string]string {
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+
+	apiEndpoint := "https://" + icingaURL + ":" + icingaPort + "/v1/objects/hosts/" + host + "?attrs=name&attrs=vars"
+	req, err := http.NewRequest("GET", apiEndpoint, nil)
+	req.SetBasicAuth(user, password)
+
+	res, err := client.Do(req)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	bytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	var results = new(Results)
+	err = json.Unmarshal(bytes, &results)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	hostObject := results.Results[0]
+	tags := make(map[string]string)
+	if hostObject.Attributes.Variables.Product != "" {
+		tags["fuse_product"] = hostObject.Attributes.Variables.Product
+	}
+	if hostObject.Attributes.Variables.Brand != "" {
+		tags["fuse_brand"] = hostObject.Attributes.Variables.Brand
+	}
+	if hostObject.Attributes.Variables.Environment != "" {
+		tags["fuse_env"] = hostObject.Attributes.Variables.Environment
+	}
+	if hostObject.Attributes.Variables.OperatingSystem != "" {
+		tags["fuse_os"] = hostObject.Attributes.Variables.OperatingSystem
+	}
+	if hostObject.Attributes.Variables.HTTP.Custom.URL != "" {
+		tags["fuse_url"] = hostObject.Attributes.Variables.OperatingSystem
+	}
+
+	return tags
+}
 
 func requestURL(bt *Icingabeat, method string, URL *url.URL) (*http.Response, error) {
 

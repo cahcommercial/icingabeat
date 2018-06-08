@@ -38,7 +38,7 @@ func NewEventstream(bt *Icingabeat, cfg config.Config) *Eventstream {
 }
 
 // BuildEventstreamEvent ...
-func BuildEventstreamEvent(e []byte) beat.Event {
+func BuildEventstreamEvent(e []byte, conf config.Config) beat.Event {
 
 	var event beat.Event
 	var icingaEvent map[string]interface{}
@@ -58,11 +58,17 @@ func BuildEventstreamEvent(e []byte) beat.Event {
 	switch icingaEvent["type"] {
 	case "CheckResult", "StateChange", "Notification":
 		checkResult := icingaEvent["check_result"].(map[string]interface{})
+
 		event.Fields.Put("check_result.execution_start", FloatToTimestamp(checkResult["execution_start"].(float64)))
 		event.Fields.Put("check_result.execution_end", FloatToTimestamp(checkResult["execution_end"].(float64)))
 		event.Fields.Put("check_result.schedule_start", FloatToTimestamp(checkResult["schedule_start"].(float64)))
 		event.Fields.Put("check_result.schedule_end", FloatToTimestamp(checkResult["schedule_end"].(float64)))
 		event.Fields.Delete("check_result.performance_data")
+
+		tags := getIcingaHostTags(icingaEvent["host"].(string), conf.Host, strconv.Itoa(conf.Port), conf.User, conf.Password)
+		for k, v := range tags {
+			event.Fields.Put(k, v)
+		}
 
 	case "AcknowledgementSet":
 		event.Delete("comment")
@@ -147,7 +153,7 @@ func (es *Eventstream) Run() error {
 					logp.Err("Error reading line %#v", err)
 				}
 
-				es.icingabeat.client.Publish(BuildEventstreamEvent(line))
+				es.icingabeat.client.Publish(BuildEventstreamEvent(line, es.config))
 				logp.Debug("icingabeat.eventstream", "Event sent")
 			}
 
